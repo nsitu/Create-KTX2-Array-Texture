@@ -88,6 +88,9 @@ async function loadMergedKTX2Array(urls) {
         parseBuffer,
         (arrayTex) => {
             arrayTex.anisotropy = 4;
+            // Mitigate mobile artifacts: avoid mips during sampling
+            arrayTex.minFilter = THREE.LinearFilter;
+            arrayTex.magFilter = THREE.LinearFilter;
             arrayTex.needsUpdate = true;
 
             layerCount = arrayTex.depth || arrayTex.image?.depth || 1;
@@ -115,7 +118,8 @@ async function loadMergedKTX2Array(urls) {
           out vec4 outColor;
 
           void main() {
-            outColor = texture(uTex, vec3(vUv, float(uLayer)));
+                        // Force LOD 0 to avoid sampling corrupted mips on some mobile devices
+                        outColor = textureLod(uTex, vec3(vUv, float(uLayer)), 0.0);
           }
         `,
             });
