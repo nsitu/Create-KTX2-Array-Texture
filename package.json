@@ -23,6 +23,7 @@
     "vite": "^7.1.7"
   },
   "dependencies": {
+    "ktx-parse": "^1.1.0",
     "three": "^0.180.0"
   }
 }
