@@ -81,7 +81,7 @@ async function loadMergedKTX2Array(urls) {
 
     const ktx2 = new KTX2Loader()
         // Vite serves files from /public at the root path
-        .setTranscoderPath('/')
+        .setTranscoderPath('./')
         .detectSupport(renderer);
 
     ktx2.parse(
