@@ -68,15 +68,13 @@ export function mergeUASTCKTX2ToArray(buffers) {
             }
             parts.push(bytes);
 
-            // For ZSTD inputs, uncompressedByteLength must be summed across layers.
-            // For NONE, writer doesn't use it — omit in that case.
             if (scheme === 2) {
                 const unc = lvl.uncompressedByteLength ?? uastcBytesPerLayerAtLevel(level);
                 totalUnc += unc;
             }
         }
 
-        // Concatenate compressed/uncompressed chunks (as they appear in inputs)
+        // Concatenate chunks
         let totalLen = 0;
         for (const p of parts) totalLen += p.byteLength;
         const merged = new Uint8Array(totalLen);
@@ -86,9 +84,11 @@ export function mergeUASTCKTX2ToArray(buffers) {
             wptr += p.byteLength;
         }
 
-        mergedLevels[level] = (scheme === 2)
-            ? { levelData: merged, uncompressedByteLength: totalUnc }
-            : { levelData: merged };
+        // Always set uncompressedByteLength (write() uses it for the level index)
+        mergedLevels[level] = {
+            levelData: merged,
+            uncompressedByteLength: scheme === 2 ? totalUnc : totalLen
+        };
     }
 
     // Output container with correct top-level header shape expected by ktx-parse v1.x
@@ -104,7 +104,6 @@ export function mergeUASTCKTX2ToArray(buffers) {
         supercompressionScheme: scheme,
         dataFormatDescriptor: H.dataFormatDescriptor,
         keyValue: H.keyValue || {},
-        // For UASTC, globalData must be null (ETC1S uses globalData).
         globalData: null,
         levels: mergedLevels
     };
