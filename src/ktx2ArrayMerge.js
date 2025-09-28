@@ -20,12 +20,8 @@ export function mergeUASTCKTX2ToArray(buffers) {
     const lvls = H.levelCount;
     const scheme = H.supercompressionScheme; // 0 (NONE) or 2 (ZSTD)
 
-    if (H.vkFormat !== 0) {
-        throw new Error('vkFormat must be 0 (Basis Universal).');
-    }
-    if (scheme !== 0 && scheme !== 2) {
-        throw new Error('Only supercompression NONE (0) or ZSTD (2) is supported.');
-    }
+    if (H.vkFormat !== 0) throw new Error('vkFormat must be 0 (Basis Universal).');
+    if (scheme !== 0 && scheme !== 2) throw new Error('Only supercompression NONE (0) or ZSTD (2) is supported.');
 
     for (let i = 1; i < containers.length; i++) {
         const hi = containers[i].header || containers[i];
@@ -43,7 +39,7 @@ export function mergeUASTCKTX2ToArray(buffers) {
     const layerCount = containers.length;
     const mergedLevels = new Array(lvls);
 
-    // UASTC bytes per mip for one layer (no ZSTD), used as a fallback if needed.
+    // Exact UASTC bytes per mip for one image (scheme NONE)
     const uastcBytesPerLayerAtLevel = (level) => {
         const wL = Math.max(1, w >> level);
         const hL = Math.max(1, h >> level);
@@ -57,18 +53,25 @@ export function mergeUASTCKTX2ToArray(buffers) {
         const parts = [];
         let totalUnc = 0;
 
+        // For NONE we’ll trim each layer’s data to the exact UASTC image size to drop any level padding
+        const exactUastc = (scheme === 0) ? uastcBytesPerLayerAtLevel(level) : undefined;
+
         for (let layer = 0; layer < layerCount; layer++) {
             const src = containers[layer];
             const sH = src.header || src;
             const lvl = sH.levels[level];
-
             const bytes = lvl.levelData;
-            if (!bytes) {
-                throw new Error(`Missing levelData for layer ${layer}, level ${level}.`);
-            }
-            parts.push(bytes);
+            if (!bytes) throw new Error(`Missing levelData for layer ${layer}, level ${level}.`);
 
-            if (scheme === 2) {
+            if (scheme === 0) {
+                if (bytes.byteLength < exactUastc) {
+                    throw new Error(`Layer ${layer} level ${level} is smaller than expected UASTC size (${bytes.byteLength} < ${exactUastc}).`);
+                }
+                // Trim off any end-of-level padding from the source KTX2
+                parts.push(bytes.subarray(0, exactUastc));
+            } else {
+                // ZSTD: use compressed bytes as-is, sum uncompressed size
+                parts.push(bytes);
                 const unc = lvl.uncompressedByteLength ?? uastcBytesPerLayerAtLevel(level);
                 totalUnc += unc;
             }
@@ -84,10 +87,10 @@ export function mergeUASTCKTX2ToArray(buffers) {
             wptr += p.byteLength;
         }
 
-        // Always set uncompressedByteLength (write() uses it for the level index)
         mergedLevels[level] = {
             levelData: merged,
-            uncompressedByteLength: scheme === 2 ? totalUnc : totalLen
+            // write() expects this even for NONE; for NONE it equals concatenated UASTC bytes
+            uncompressedByteLength: (scheme === 0) ? totalLen : totalUnc
         };
     }
 
