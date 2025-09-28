@@ -38,7 +38,6 @@ export function mergeUASTCKTX2ToArray(buffers) {
 
     const layerCount = containers.length;
     const mergedLevels = new Array(lvls);
-    const imageDescs = [];
 
     // Exact UASTC bytes per mip for one image (scheme NONE)
     const uastcBytesPerLayerAtLevel = (level) => {
@@ -53,9 +52,8 @@ export function mergeUASTCKTX2ToArray(buffers) {
     for (let level = 0; level < lvls; level++) {
         const parts = [];
         let totalUnc = 0;
-        let offset = 0; // offset within the uncompressed stream for this level
 
-        // For NONE we’ll trim each layer’s data to the exact UASTC image size to drop any level padding
+        // For NONE we’ll trim each layer’s data to the exact UASTC image size then pad to 4-byte alignment
         const exactUastc = (scheme === 0) ? uastcBytesPerLayerAtLevel(level) : undefined;
 
         for (let layer = 0; layer < layerCount; layer++) {
@@ -69,31 +67,21 @@ export function mergeUASTCKTX2ToArray(buffers) {
                 if (bytes.byteLength < exactUastc) {
                     throw new Error(`Layer ${layer} level ${level} is smaller than expected UASTC size (${bytes.byteLength} < ${exactUastc}).`);
                 }
-                // Trim off any end-of-level padding from the source KTX2
+                // Trim to exact UASTC size
                 const trimmed = bytes.subarray(0, exactUastc);
-                parts.push(trimmed);
-
-                // Describe where this image lives in the (uncompressed) level stream
-                imageDescs.push({
-                    imageFlags: 0,
-                    rgbByteOffset: offset,
-                    rgbByteLength: exactUastc,
-                    alphaByteOffset: 0,
-                    alphaByteLength: 0
-                });
-                offset += exactUastc;
+                // Pad each image slice to 4-byte alignment (KTX2 requirement for unsupercompressed levels)
+                const pad = (4 - (trimmed.byteLength % 4)) % 4;
+                if (pad) {
+                    const padded = new Uint8Array(trimmed.byteLength + pad);
+                    padded.set(trimmed, 0);
+                    parts.push(padded);
+                } else {
+                    parts.push(trimmed);
+                }
             } else {
-                // ZSTD: use compressed bytes as-is, sum uncompressed size and record desc
+                // ZSTD: use compressed bytes as-is, sum uncompressed size
                 parts.push(bytes);
                 const unc = lvl.uncompressedByteLength ?? uastcBytesPerLayerAtLevel(level);
-                imageDescs.push({
-                    imageFlags: 0,
-                    rgbByteOffset: offset,
-                    rgbByteLength: unc,
-                    alphaByteOffset: 0,
-                    alphaByteLength: 0
-                });
-                offset += unc;
                 totalUnc += unc;
             }
         }
@@ -110,7 +98,7 @@ export function mergeUASTCKTX2ToArray(buffers) {
 
         mergedLevels[level] = {
             levelData: merged,
-            // Required: total bytes in the (uncompressed) level stream
+            // Always set; for NONE this equals concatenated length (including per-image padding)
             uncompressedByteLength: (scheme === 0) ? totalLen : totalUnc
         };
     }
@@ -128,8 +116,8 @@ export function mergeUASTCKTX2ToArray(buffers) {
         supercompressionScheme: scheme,
         dataFormatDescriptor: H.dataFormatDescriptor,
         keyValue: H.keyValue || {},
-        // Critical for BasisU arrays: split the uncompressed level stream into per-image slices
-        globalData: { imageDescs },
+        // For UASTC, keep null. (ETC1S uses globalData; UASTC does not need it.)
+        globalData: null,
         levels: mergedLevels
     };
 
